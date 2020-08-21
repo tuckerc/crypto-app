@@ -1,25 +1,27 @@
 #!/usr/bin/python3
 
-from os import environ, remove, mkdir
-from os.path import splitext
+from os import getenv, remove, mkdir
+from os.path import splitext, exists
 from pathlib import Path
 from shutil import rmtree
-import aws_encryption_sdk
-import boto3
-from flask import Flask, render_template, request, send_file
-from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
+import aws_encryption_sdk
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, send_file
+
+load_dotenv(override=True)
+
+application = Flask(__name__)
 
 # identify KMS CMK
 kms_key_provider = aws_encryption_sdk.KMSMasterKeyProvider(key_ids=[
-    environ.get('KEY_ID_1')
+    getenv('KEY_ID_1')
 ])
 
 
 # method for encrypting uploaded file
 def encrypt_file(file):
-    ct_filename = str(splitext(file)[0]) + '.ct'
+    ct_filename = str(file) + '.ct'
     with open(file, 'rb') as pt_file, open(ct_filename, 'wb') as ct_file:
         with aws_encryption_sdk.stream(
                 mode='e',
@@ -32,8 +34,8 @@ def encrypt_file(file):
 
 
 # method for decrypting uploaded file
-def decrypt_file(file, filetype):
-    pt_filename = str(splitext(file)[0]) + "." + filetype
+def decrypt_file(file):
+    pt_filename = splitext(file)[0]
     with open(file, 'rb') as ct_file, open(pt_filename, 'wb') as pt_file:
         with aws_encryption_sdk.stream(
                 mode='d',
@@ -45,8 +47,8 @@ def decrypt_file(file, filetype):
     return pt_filename
 
 
-@app.route("/", methods=["GET"])
-@app.route("/upload", methods=["POST"])
+@application.route("/", methods=["GET"])
+@application.route("/upload", methods=["POST"])
 def load():
     rmtree("files")
     mkdir("files")
@@ -58,8 +60,7 @@ def load():
         file = path / f.filename
         f.save(file)
         if splitext(file)[1] == '.ct':
-            filetype = request.values["filetype"]
-            pt_file = decrypt_file(file, filetype)
+            pt_file = decrypt_file(file)
             remove(file)
             return send_file(pt_file, as_attachment=True)
         else:
@@ -69,10 +70,19 @@ def load():
         # return render_template("download.html", file=ct_file)
 
 
-# @app.route("/uploader", methods=["GET", "POST"])
+# @application.route("/uploader", methods=["GET", "POST"])
 # def upload_file():
 
 
-
 if __name__ == "__main__":
-    app.run(host=environ.get('CRYPTO_HOST'), port=environ.get('CRYPTO_PORT'))
+    application.run(port=getenv('CRYPTO_PORT'), debug=True)
+
+
+def test_encrypt_decrypt():
+    encrypt_file("test/06282020WenatcheeFamily.jpg")
+    assert exists("test/06282020WenatcheeFamily.jpg.ct")
+    remove("test/06282020WenatcheeFamily.jpg")
+    decrypt_file("test/06282020WenatcheeFamily.jpg.ct")
+    assert exists("test/06282020WenatcheeFamily.jpg")
+
+
